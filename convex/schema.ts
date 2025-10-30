@@ -155,9 +155,24 @@ export default defineSchema({
     userId: v.string(),
     workoutIds: v.array(v.id("workouts")),
     insightText: v.string(),
-    category: v.string(), // "recovery", "performance", "pattern", "warning"
+    category: v.string(), // "recovery", "performance", "injury_risk", "pattern", "recommendation"
     generatedAt: v.string(),
     confidence: v.optional(v.number()),
+    priority: v.optional(v.string()), // "low", "medium", "high"
+    metadata: v.optional(
+      v.object({
+        relatedThemes: v.optional(v.array(v.string())),
+        relatedBodyParts: v.optional(v.array(v.string())),
+        trendData: v.optional(v.any()),
+        analysisSnapshot: v.optional(
+          v.object({
+            totalWorkoutsAnalyzed: v.number(),
+            analysisDate: v.string(),
+            triggerWorkoutId: v.id("workouts"),
+          })
+        ),
+      })
+    ),
   })
     .index("by_user", ["userId"])
     .index("by_workout", ["workoutIds"]),

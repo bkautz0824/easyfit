@@ -23,8 +23,23 @@ export const createInsight = mutation({
     workoutIds: v.array(v.id("workouts")),
     insightText: v.string(),
     category: v.string(),
-    generatedAt: v.string(),
+    generatedAt: v.string(), // Accept generatedAt from caller
     confidence: v.optional(v.number()),
+    priority: v.optional(v.string()),
+    metadata: v.optional(
+      v.object({
+        relatedThemes: v.optional(v.array(v.string())),
+        relatedBodyParts: v.optional(v.array(v.string())),
+        trendData: v.optional(v.any()),
+        analysisSnapshot: v.optional(
+          v.object({
+            totalWorkoutsAnalyzed: v.number(),
+            analysisDate: v.string(),
+            triggerWorkoutId: v.id("workouts"),
+          })
+        ),
+      })
+    ),
   },
   handler: async (ctx, args) => {
     return ctx.db.insert("insights", {
@@ -32,8 +47,10 @@ export const createInsight = mutation({
       workoutIds: args.workoutIds,
       insightText: args.insightText,
       category: args.category,
-      generatedAt: args.generatedAt,
+      generatedAt: args.generatedAt, // Use the provided timestamp
       confidence: args.confidence,
+      priority: args.priority,
+      metadata: args.metadata,
     });
   },
 });

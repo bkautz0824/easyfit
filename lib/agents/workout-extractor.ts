@@ -108,7 +108,7 @@ Return JSON only.`,
         },
       ],
       system: WORKOUT_EXTRACTION_PROMPT,
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-sonnet-4-5", // Latest Claude Sonnet (auto-updates to newest 4.5)
       max_tokens: 2000,
       temperature: 0.3, // Lower temperature for more consistent extraction
     });

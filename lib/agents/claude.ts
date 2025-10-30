@@ -22,7 +22,7 @@ export interface ClaudeResponse {
 
 // Helper function for Claude API calls
 export async function callClaude({
-  model = "claude-3-5-sonnet-20241022",
+  model = "claude-sonnet-4-5", // Latest Claude Sonnet (auto-updates to newest 4.5)
   messages,
   system,
   max_tokens = 1000,
@@ -63,7 +63,7 @@ export async function callClaude({
 
 // Streaming version for real-time responses
 export async function* streamClaude({
-  model = "claude-3-5-sonnet-20241022",
+  model = "claude-sonnet-4-5", // Latest Claude Sonnet (auto-updates to newest 4.5)
   messages,
   system,
   max_tokens = 1000,
