@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
         return {
           workoutId: workout._id,
           date: workout.date,
-          type: workout.type,
+          type: context?.workoutType, // Type comes from context, not workout
           duration: workout.duration,
           avgHeartRate: workout.avgHeartRate,
           maxHeartRate: workout.maxHeartRate,
