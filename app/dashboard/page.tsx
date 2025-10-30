@@ -9,17 +9,42 @@ import { UnresolvedWorkoutCard } from "@/components/workouts/unresolved-workout-
 import { WorkoutDetailView } from "@/components/workouts/workout-detail-view";
 import { VoiceContextRecorder } from "@/components/workouts/voice-context-recorder";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertCircle, CheckCircle } from "lucide-react";
+import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import type { Id } from "@/convex/_generated/dataModel";
+import { useDevUser } from "@/hooks/use-dev-user";
+import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<Id<"workouts"> | null>(null);
+  const { userId, isLoading: isAuthLoading, isAuthenticated } = useDevUser();
+  const router = useRouter();
 
-  // TEMP: Hardcoded user ID for testing (auth disabled)
-  const userId = "test-user-123";
-
-  const unresolvedWorkouts = useQuery(api.workouts.getUnresolvedWorkouts, { userId });
+  // Always call hooks - React requires this
+  const unresolvedWorkouts = useQuery(
+    api.workouts.getUnresolvedWorkouts,
+    userId ? { userId } : "skip"
+  );
   const selectedWorkout = unresolvedWorkouts?.find(w => w._id === selectedWorkoutId);
+
+  // Redirect to login if not authenticated
+  if (!isAuthLoading && !isAuthenticated) {
+    router.push("/login");
+    return null;
+  }
+
+  // Show loading state while checking auth
+  if (isAuthLoading || !userId) {
+    return (
+      <DashboardShell>
+        <div className="flex items-center justify-center h-[calc(100vh-12rem)]">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          </div>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   const handleWorkoutClick = (workoutId: Id<"workouts">) => {
     setSelectedWorkoutId(workoutId);

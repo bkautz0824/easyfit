@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { Loader2, Code2 } from "lucide-react";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
 
 function LoginForm() {
   const router = useRouter();
@@ -17,8 +19,37 @@ function LoginForm() {
   const { signIn } = useAuthActions();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [isDevLogin, setIsDevLogin] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const getOrCreateDevUser = useMutation(api.devAuth.getOrCreateDevUser);
+
+  const handleDevLogin = async () => {
+    setIsDevLogin(true);
+    try {
+      // Create/get dev user and store in localStorage
+      const user = await getOrCreateDevUser();
+
+      // Store dev user in localStorage for the app to use
+      localStorage.setItem("devUser", JSON.stringify(user));
+
+      toast({
+        title: "Dev Mode Activated",
+        description: `Logged in as ${user.name} (${user.email})`,
+      });
+
+      const redirect = searchParams.get("redirect") || "/dashboard";
+      router.push(redirect);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to activate dev mode",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDevLogin(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +119,31 @@ function LoginForm() {
             {isLoading ? "Signing in..." : "Sign In"}
           </Button>
         </form>
+
+        {/* Dev Mode Login */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">
+              Or for development
+            </span>
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full border-2 border-dashed"
+          onClick={handleDevLogin}
+          disabled={isDevLogin}
+        >
+          {isDevLogin && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <Code2 className="mr-2 h-4 w-4" />
+          {isDevLogin ? "Activating Dev Mode..." : "Continue as Dev User"}
+        </Button>
+
         <div className="mt-4 text-center text-sm">
           Don't have an account?{" "}
           <Link href="/register" className="text-primary hover:underline font-medium">

@@ -1,14 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Mic, MicOff, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { useDevUser } from "@/hooks/use-dev-user";
 
 interface VoiceContextRecorderProps {
-  workoutId: string;
+  workoutId: Id<"workouts">;
   onContextSubmitted?: () => void;
 }
 
@@ -19,30 +23,106 @@ export function VoiceContextRecorder({
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [processingStep, setProcessingStep] = useState("");
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   const { toast } = useToast();
+  const { userId } = useDevUser();
+  const createContext = useMutation(api.workoutContext.createContext);
 
   const handleStartRecording = async () => {
-    // TODO: Implement actual voice recording with ElevenLabs/Deepgram
-    setIsRecording(true);
-    toast({
-      title: "Recording Started",
-      description: "Speak about your workout experience...",
-    });
+    try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Create MediaRecorder
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm",
+      });
+
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      // Collect audio chunks
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      // Start recording
+      mediaRecorder.start();
+      setIsRecording(true);
+
+      toast({
+        title: "Recording Started",
+        description: "Speak about your workout experience...",
+      });
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      toast({
+        title: "Microphone Error",
+        description: "Please grant microphone permissions to use voice recording.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleStopRecording = async () => {
+    if (!mediaRecorderRef.current) return;
+
     setIsRecording(false);
     setIsProcessing(true);
+    setProcessingStep("Transcribing audio...");
 
-    // TODO: Implement actual transcription and Claude processing
-    // For now, just simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      toast({
-        title: "Voice Processed",
-        description: "Your workout context has been analyzed.",
-      });
-    }, 2000);
+    // Stop recording
+    mediaRecorderRef.current.stop();
+
+    // Stop all audio tracks
+    mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+
+    // Wait for the stop event and process audio
+    mediaRecorderRef.current.onstop = async () => {
+      try {
+        // Create audio blob
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
+
+        // Send to transcription endpoint
+        const formData = new FormData();
+        formData.append("audio", audioBlob, "recording.webm");
+
+        const transcribeResponse = await fetch("/api/openai/transcribe", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!transcribeResponse.ok) {
+          throw new Error("Transcription failed");
+        }
+
+        const { transcript: transcribedText } = await transcribeResponse.json();
+        setTranscript(transcribedText);
+
+        toast({
+          title: "Transcription Complete",
+          description: "Review and edit the transcript if needed, then save.",
+        });
+      } catch (error) {
+        console.error("Error processing audio:", error);
+        toast({
+          title: "Processing Error",
+          description: "Failed to transcribe audio. Please try again or type manually.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsProcessing(false);
+        setProcessingStep("");
+      }
+    };
   };
 
   const handleSubmit = async () => {
@@ -55,31 +135,84 @@ export function VoiceContextRecorder({
       return;
     }
 
+    if (!userId) {
+      toast({
+        title: "Authentication Error",
+        description: "User not found. Please log in again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsProcessing(true);
+    setProcessingStep("Extracting workout context with AI...");
 
     try {
-      // TODO: Implement actual submission
-      // 1. Process transcript with Claude to extract context
-      // 2. Save to workoutContext table
-      // 3. Update workout status to "resolved"
-
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      toast({
-        title: "Context Saved",
-        description: "Workout has been marked as resolved.",
+      // Step 1: Extract structured data from transcript using Claude
+      const extractResponse = await fetch("/api/workouts/extract-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript }),
       });
 
+      if (!extractResponse.ok) {
+        throw new Error("Context extraction failed");
+      }
+
+      const extractedData = await extractResponse.json();
+
+      setProcessingStep("Generating semantic embeddings...");
+
+      // Step 2: Generate embedding for semantic search
+      const embedResponse = await fetch("/api/openai/embed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: transcript }),
+      });
+
+      if (!embedResponse.ok) {
+        throw new Error("Embedding generation failed");
+      }
+
+      const { embedding } = await embedResponse.json();
+
+      setProcessingStep("Saving to database...");
+
+      // Step 3: Save to Convex and Pinecone
+      const saveResponse = await fetch("/api/workouts/save-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workoutId,
+          userId,
+          transcript,
+          extractedData,
+          embedding,
+        }),
+      });
+
+      if (!saveResponse.ok) {
+        throw new Error("Failed to save context");
+      }
+
+      toast({
+        title: "Context Saved Successfully",
+        description: "Workout has been marked as resolved with AI insights.",
+      });
+
+      // Reset form
+      setTranscript("");
       onContextSubmitted?.();
     } catch (error) {
+      console.error("Error saving context:", error);
       toast({
         title: "Error",
-        description: "Failed to save workout context.",
+        description: error instanceof Error ? error.message : "Failed to save workout context.",
         variant: "destructive",
       });
     } finally {
       setIsProcessing(false);
+      setProcessingStep("");
     }
   };
 
@@ -131,11 +264,15 @@ export function VoiceContextRecorder({
 
         {/* Manual Transcript Input */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">Or type manually:</label>
+          <label className="text-sm font-medium">
+            {transcript ? "Review & Edit Transcript:" : "Or type manually:"}
+          </label>
           <Textarea
             placeholder="Example: Did a 5k tempo run this morning. Felt great for the first 3k but struggled with pacing in the last 2k. Left knee felt a bit tight on the downhills. Overall energy was good, RPE around 7/10."
             value={transcript}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTranscript((e.target as HTMLTextAreaElement).value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+              setTranscript((e.target as HTMLTextAreaElement).value)
+            }
             rows={6}
             disabled={isRecording || isProcessing}
           />
@@ -150,16 +287,16 @@ export function VoiceContextRecorder({
           {isProcessing ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Processing with AI...
+              {processingStep || "Processing with AI..."}
             </>
           ) : (
             "Save Context & Mark Resolved"
           )}
         </Button>
 
-        {isProcessing && (
+        {isProcessing && processingStep && (
           <p className="text-xs text-center text-muted-foreground">
-            AI is analyzing your workout context...
+            {processingStep}
           </p>
         )}
       </CardContent>
