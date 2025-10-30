@@ -93,9 +93,10 @@ export async function POST(req: NextRequest) {
       generatedInsights.map(async (insight) => {
         return await convex.mutation(api.insights.createInsight, {
           userId: insight.userId,
-          workoutIds: insight.workoutIds,
+          workoutIds: insight.workoutIds as Id<"workouts">[],
           insightText: insight.insightText,
           category: insight.category,
+          generatedAt: insight.generatedAt,
           confidence: insight.confidence,
           priority: insight.priority,
           metadata: insight.metadata,
