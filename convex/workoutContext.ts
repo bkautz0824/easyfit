@@ -21,6 +21,9 @@ export const createContext = mutation({
     // Raw data
     voiceTranscript: v.string(),
 
+    // Vector embedding (1536 dimensions from OpenAI)
+    embedding: v.array(v.float64()),
+
     // Extracted data
     workoutType: v.optional(v.string()),
     workoutSubType: v.optional(v.string()),
@@ -194,5 +197,155 @@ export const getWorkoutWithContext = query({
       ...workout,
       context,
     };
+  },
+});
+
+// Vector search for similar workouts with post-filtering
+export const vectorSearch = query({
+  args: {
+    embedding: v.array(v.float64()),
+    userId: v.string(),
+    limit: v.optional(v.number()),
+
+    // Pre-filters (applied during vector search - faster)
+    workoutType: v.optional(v.string()),
+    mood: v.optional(v.string()),
+
+    // Post-filters (applied after vector search - more flexible)
+    bodyPart: v.optional(v.string()), // e.g., "knee", "shoulder", "hamstring"
+    hasPainPoints: v.optional(v.boolean()), // only workouts with pain mentioned
+    minPerceivedExertion: v.optional(v.number()), // e.g., only hard workouts (RPE >= 7)
+  },
+  handler: async (ctx, args) => {
+    const {
+      embedding,
+      userId,
+      limit = 20, // Fetch more initially for post-filtering
+      workoutType,
+      mood,
+      bodyPart,
+      hasPainPoints,
+      minPerceivedExertion,
+    } = args;
+
+    // PRE-FILTER: Applied during vector search (fast, but limited to indexed fields)
+    const results = await ctx.db
+      .query("workoutContext")
+      .withIndex("by_embedding", (q) =>
+        q.similar("embedding", embedding, limit * 2) // Fetch 2x for post-filtering
+      )
+      .filter((q) => {
+        let filterExpression = q.eq("userId", userId);
+        if (workoutType) {
+          filterExpression = q.and(filterExpression, q.eq("workoutType", workoutType));
+        }
+        if (mood) {
+          filterExpression = q.and(filterExpression, q.eq("mood", mood));
+        }
+        return filterExpression;
+      })
+      .collect();
+
+    // POST-FILTER: Applied in-memory (flexible, but slower)
+    let filteredResults = results;
+
+    // Filter by body part mentioned
+    if (bodyPart) {
+      filteredResults = filteredResults.filter((context) =>
+        context.bodyParts?.some((part) =>
+          part.toLowerCase().includes(bodyPart.toLowerCase())
+        )
+      );
+    }
+
+    // Filter for workouts with pain points
+    if (hasPainPoints) {
+      filteredResults = filteredResults.filter(
+        (context) => context.painPoints && context.painPoints.length > 0
+      );
+    }
+
+    // Filter by minimum RPE
+    if (minPerceivedExertion !== undefined) {
+      filteredResults = filteredResults.filter(
+        (context) =>
+          context.perceivedExertion !== undefined &&
+          context.perceivedExertion >= minPerceivedExertion
+      );
+    }
+
+    // Limit results after filtering
+    filteredResults = filteredResults.slice(0, limit);
+
+    // Fetch associated workout data (objective metrics)
+    const contextsWithWorkouts = await Promise.all(
+      filteredResults.map(async (context) => {
+        const workout = await ctx.db.get(context.workoutId);
+        return {
+          context,
+          workout,
+        };
+      })
+    );
+
+    return contextsWithWorkouts;
+  },
+});
+
+// Dedicated body part search (when you know exactly what you want)
+export const searchByBodyPart = query({
+  args: {
+    userId: v.string(),
+    bodyPart: v.string(), // e.g., "knee", "shoulder", "hamstring"
+    workoutType: v.optional(v.string()),
+    sortBy: v.optional(v.string()), // "date", "pain_severity" (based on painPoints count)
+  },
+  handler: async (ctx, args) => {
+    const { userId, bodyPart, workoutType, sortBy = "date" } = args;
+
+    // Get all contexts for this user
+    const contexts = await ctx.db
+      .query("workoutContext")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+
+    // Filter by body part
+    let filtered = contexts.filter((context) => {
+      const hasBodyPart = context.bodyParts?.some((part) =>
+        part.toLowerCase().includes(bodyPart.toLowerCase())
+      );
+
+      const matchesType = !workoutType || context.workoutType === workoutType;
+
+      return hasBodyPart && matchesType;
+    });
+
+    // Sort results
+    if (sortBy === "pain_severity") {
+      filtered.sort((a, b) => {
+        const aPainCount = a.painPoints?.length || 0;
+        const bPainCount = b.painPoints?.length || 0;
+        return bPainCount - aPainCount; // Descending (most pain first)
+      });
+    } else {
+      // Sort by date (most recent first)
+      filtered.sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    }
+
+    // Fetch associated workout data
+    const contextsWithWorkouts = await Promise.all(
+      filtered.map(async (context) => {
+        const workout = await ctx.db.get(context.workoutId);
+        return {
+          context,
+          workout,
+          painPointCount: context.painPoints?.length || 0,
+        };
+      })
+    );
+
+    return contextsWithWorkouts;
   },
 });

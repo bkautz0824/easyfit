@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
-import { upsertWorkoutEmbedding } from "@/lib/pinecone/client";
 import type { Id } from "@/convex/_generated/dataModel";
 
 // Initialize Convex client for server-side calls
@@ -12,7 +11,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { workoutId, userId, transcript, extractedData, embedding } = body as {
       workoutId: Id<"workouts">;
-      userId: Id<"users">;
+      userId: string;
       transcript: string;
       extractedData: any;
       embedding: number[];
@@ -25,7 +24,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get workout for date
+    // Get workout to verify it exists
     const workout = await convex.query(api.workouts.getById, { id: workoutId });
 
     if (!workout) {
@@ -35,29 +34,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 1: Save to Pinecone for vector search
-    await upsertWorkoutEmbedding({
-      workoutId,
-      userId,
-      embedding,
-      metadata: {
-        date: workout.date,
-        workoutType: extractedData.workoutType,
-        workoutSubType: extractedData.workoutSubType,
-        mood: extractedData.mood,
-        perceivedExertion: extractedData.perceivedExertion,
-        themes: extractedData.themes,
-        feelings: extractedData.feelings,
-        keywords: extractedData.keywords,
-        painPoints: extractedData.painPoints,
-      },
-    });
-
-    // Step 2: Save structured data to Convex
+    // Save to Convex with vector embedding
+    // This stores:
+    // 1. Structured data (all extracted fields)
+    // 2. Vector embedding (for semantic search)
+    // 3. Foreign key to objective workout data (workoutId)
     await convex.mutation(api.workoutContext.createContext, {
       workoutId,
       userId,
       voiceTranscript: transcript,
+      embedding, // Vector stored alongside structured data in Convex
       workoutType: extractedData.workoutType,
       workoutSubType: extractedData.workoutSubType,
       perceivedExertion: extractedData.perceivedExertion,
@@ -79,7 +65,7 @@ export async function POST(req: NextRequest) {
       trainingRecommendation: extractedData.trainingRecommendation,
     });
 
-    // Step 3: Update workout status to resolved
+    // Update workout status to resolved
     await convex.mutation(api.workouts.updateStatus, {
       workoutId,
       status: "resolved",
@@ -87,7 +73,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: "Workout context saved successfully",
+      message: "Workout context saved successfully to Convex with vector embedding",
     });
   } catch (error) {
     console.error("Error saving context:", error);

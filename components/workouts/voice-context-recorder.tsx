@@ -4,12 +4,13 @@ import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Loader2 } from "lucide-react";
+import { Mic, MicOff, Loader2, AlertCircle, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useDevUser } from "@/hooks/use-dev-user";
+import { validateTranscriptBeforeProcessing } from "@/lib/agents/context-validator";
 
 interface VoiceContextRecorderProps {
   workoutId: Id<"workouts">;
@@ -225,10 +226,16 @@ export function VoiceContextRecorder({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Describe your workout experience: What type of workout was it? How did
-          you feel? Any pain points or highlights? What was your energy level?
-        </p>
+        {/* Helpful prompts for better context */}
+        <div className="bg-muted/50 p-3 rounded-lg space-y-2">
+          <p className="text-sm font-medium">Quick tips for quality insights:</p>
+          <ul className="text-xs text-muted-foreground space-y-1 ml-4 list-disc">
+            <li><strong>Intensity:</strong> How hard was it? (1-10 or easy/moderate/hard)</li>
+            <li><strong>Body parts:</strong> What did you work? (legs, chest, etc.)</li>
+            <li><strong>Energy/Mood:</strong> How did you feel before/during?</li>
+            <li><em>Bonus:</em> Any pain? What went well or was challenging?</li>
+          </ul>
+        </div>
 
         {/* Voice Recording Controls */}
         <div className="flex gap-2">
